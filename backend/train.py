@@ -9,8 +9,11 @@ from sklearn.svm import SVR
 import math
 import os
 import joblib
+import pytorch
+import torch
 
 WEIGHTS_FILE = "../data/weights.apt"
+OUR_MODEL_FILE = "../data/model.pt"
 
 # Training class
 # Allows for two methods - RandomForest and LinearRegression
@@ -26,15 +29,15 @@ class Train:
         else:
             self.regressor = LinearRegression()
 
-        #TODO(@apostolescus)
+        # TODO(@apostolescus)
         self.x, self.y, self.test_data, _ = Preprocessor().get_dataset()
 
     # False to get test data, True to get train data
-    def _get_test_train_data(self, train, all = False):
+    def _get_test_train_data(self, train, all=False):
 
         if all is True:
             return self.x, self.y
-        
+
         x_train, x_test, y_train, y_test = train_test_split(self.x,
                                                             self.y,
                                                             test_size=0.2)
@@ -51,7 +54,7 @@ class Train:
 
         joblib.dump(self.regressor, WEIGHTS_FILE)
 
-    #test method - plots the difference btw prediction and ground truth
+    # test method - plots the difference btw prediction and ground truth
     def test(self, model_name=WEIGHTS_FILE):
 
         self.regressor = joblib.load(model_name)
@@ -68,8 +71,8 @@ class Train:
         # plt.show()
         plt.savefig("graph.png")
 
-    #compares multiple prediction methods
-    #generates graphic representation of RMSE
+    # compares multiple prediction methods
+    # generates graphic representation of RMSE
     def test_multiple_methods(self):
 
         x_train, y_train = self._get_test_train_data(True)
@@ -131,22 +134,22 @@ class Train:
 
         return rmse
 
-    def calculate_test(self, model_name = WEIGHTS_FILE):
+    def calculate_test(self, model_name=WEIGHTS_FILE):
         self.regressor = joblib.load(model_name)
 
         y_predicted = self.regressor.predict(self.test_data)
-    
+
         f = open("../others/results.txt", "w")
 
         for i in y_predicted:
-            f.write(str(round(i,2)) + "\n")
-  
+            f.write(str(round(i, 2)) + "\n")
+
         return y_predicted
 
     def _load_true_notes(self):
 
         array = np.loadtxt("true_notes")
-        print("True notes:",array)
+        print("True notes:", array)
 
         return array
 
@@ -164,7 +167,49 @@ class Predictor:
         return prediction
 
 
-#How to run
+class PredictorTorch:
+    def __init__(self, model_name=OUR_MODEL_FILE):
+
+        self.model = pytorch.RegressionModel(pytorch.getInputNumber(), 1)
+        self.model.load_state_dict(torch.load(model_name))
+        self.model.eval()
+        print(self.model)
+
+    # returns <class 'numpy.ndarray'>
+    def predict(self, features):
+        # Pregatim DataLoader-ul pentru validare
+        test_loader = torch.utils.data.DataLoader(
+            pytorch.getTestSet(), batch_size=32, shuffle=False)
+
+        # Pregatim o modalitate de stocare a datelor pentru evaluare
+        eval_outputs = []
+        true_labels = []
+        x = []
+
+        # ########### Evaluation Loop #############
+        print(test_loader)
+        with torch.no_grad():
+            for batch in test_loader:
+
+                inputs, labels = batch['features'], batch['labels']
+                # calculate outputs by running images through the network
+                outputs = self.model(inputs)
+                eval_outputs = outputs.squeeze(dim=1).tolist()
+                true_labels = labels.squeeze(dim=1).tolist()
+                x = inputs.squeeze(dim=1).tolist()
+
+        print("################")
+        print(np.argmax(eval_outputs))
+        print("################")
+
+        sum = 0
+        for i in true_labels:
+            sum += i
+
+        return [sum/len(true_labels)]
+
+
+# How to run
 
 train = Train(True)
 train.train()
@@ -179,4 +224,3 @@ train.calculate_test()
 
 # # print(y_true)
 # print("RMSE: ", train._calculate_rmse(y_true, true_notes))
-

@@ -11,11 +11,13 @@ import time
 import warnings
 import feature_extraction
 from preprocessor import Preprocessor
-from train import Train, Predictor
+from train import Train, Predictor, PredictorTorch
+import pytorch
 
 DOWNLOAD_DIRECTORY = "uploads"
 EXTRACTION_DIRECTORY = "../data/raw/train"
 GRADES_CSV_FILENAME = "../data/grades.csv"
+FEATURES_CSV_FILENAME = "../data/features.csv"
 INIT_DATASET = False
 TRAIN_MODEL = True
 
@@ -32,6 +34,25 @@ CORS(app)
 @app.route("/")
 def default_route():
     return "Alemia API\n"
+
+# Ruta pentru returnarea statisticilor
+
+
+@app.route("/return_statistics", methods=["GET"])
+def statistics_route():
+
+    # Get features from specific CSV file
+
+    fields = ['nr_clase', 'nr_errors', 'nr_inheritance', 'nr_virtual', 'nr_static', 'nr_global', 'nr_public', 'nr_private', 'nr_protected', 'nr_define',
+              'nr_template', 'nr_stl', 'nr_namespace', 'nr_enum', 'nr_struct', 'nr_cpp', 'nr_comments', 'nr_function', 'headers_size', 'sources_size']
+
+    features_df = pandas.read_csv(
+        FEATURES_CSV_FILENAME, skipinitialspace=True, usecols=fields)
+
+    tail = features_df.tail(1)
+
+    # Return a result
+    return tail.to_json(orient='records')
 
 
 # Prediction route
@@ -100,20 +121,100 @@ def grade_adjustment_route():
 @app.route("/retrain_model", methods=["GET"])
 def model_retraining_route():
 
+    # Get arguments
+    model = request.args.get("model", type=int)
+
     # Create a thread that retrain the model
-    Thread(target=retrain_model).start()
+    Thread(target=retrain_model(model)).start()
 
     # Return a result
     result = {"status": "ok"}
     return jsonify(result)
 
 
+# Prediction route for multiple files
+@app.route("/predict_multiple", methods=["POST"])
+def predict_multiple_route():
+
+    global last_student_scanned, preprocessor, predictor
+
+    # Get arguments
+    uploaded_file = request.files["file"]
+
+    # Generate a filename and save the file locally
+    unique_filename = uploaded_file.filename + str(time.time())
+    unique_filename = MD5.new(unique_filename.encode("utf-8")).hexdigest()
+    last_student_scanned = unique_filename
+    full_path = os.path.join(DOWNLOAD_DIRECTORY, unique_filename + ".zip")
+    uploaded_file.save(full_path)
+
+    # Extract the uploaded archive
+    extraction_full_path = os.path.join(EXTRACTION_DIRECTORY, unique_filename)
+    os.makedirs(extraction_full_path)
+
+    grade_list = []
+
+    with zipfile.ZipFile(full_path, "r") as zip_file:
+        zip_file.extractall(extraction_full_path)
+
+        dirs = list(set([os.path.dirname(x) for x in zip_file.namelist()]))
+        topdirs = [os.path.split(x)[0] for x in dirs]
+
+        mylist = []
+        for elem in topdirs:
+            if elem.count('/') == 2:
+                mylist.append(elem)
+
+        mylist.sort()
+        for x in mylist:
+            # Get features
+            features = feature_extraction.retrain_data_one(
+                extraction_full_path + "/" + x + "/")
+            features = preprocessor.transform_entry(features)
+
+            # Predict the grade
+            grade = predictor.predict([features])[0]
+            grade = round(grade, 2)
+
+            # Dump the grade into the specific CSV file
+            grades_df = pandas.read_csv(GRADES_CSV_FILENAME)
+            grades_df.loc[len(grades_df.index)] = [last_student_scanned, grade]
+            grades_df = grades_df[["label", "grade"]]
+            grades_df.to_csv(GRADES_CSV_FILENAME, index=False)
+
+            print(grade)
+            grade_list.append(grade)
+
+    # Return a result
+    result = {"predicted_grade": grade_list}
+    return jsonify(result)
+
+
 # Function for retraining the machine learning model
-def retrain_model():
+# def retrain_model():
+#     global predictor, preprocessor
+
+#     Train(check=True).train()
+#     predictor = Predictor()
+#     preprocessor = Preprocessor()
+
+#     print("[+] Successfully retrained the model")
+
+# Function for retraining the machine learning model
+def retrain_model(model):
     global predictor, preprocessor
 
-    Train(check=True).train()
-    predictor = Predictor()
+    # Train(check=True).train()
+    if (model == 1):
+        Train(check=True).train()
+    else:
+        pytorch.our_train()
+
+    if (model == 1):
+        predictor = Predictor()
+    else:
+        predictor = PredictorTorch()
+
     preprocessor = Preprocessor()
 
     print("[+] Successfully retrained the model")
